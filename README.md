@@ -1,38 +1,40 @@
 # cwatch
 
-`cwatch` is a light local video library for Linux. It scans `~/media` by default,
-groups videos by directory, shows a simple grid, and opens videos in an external
-player.
+`cwatch` is a video app for Linux with a Netflix-style interface. It combines
+your local library (`~/media` by default) with online catalogs, and it can
+stream or download episodes and movies from torrents.
 
-`mpv` is the default player when available. When opened with `mpv`, `cwatch`
-stores resume progress in `~/.local/state/cwatch/watch_later` and shows `resume`
-timestamps in the library.
+- Home, Shows, Movies and Anime tabs with a large hero banner and poster rows
+- Catalog and metadata from Cinemeta (shows and movies) and Kitsu (anime)
+- Sources from Torrentio and Nyaa, side by side, with quality, seeders and size
+- Stream a torrent straight into `mpv` without waiting for the full download
+- Download a single episode, a pick from a batch, or a whole torrent into
+  `~/media/<title>`
+- Local folders are matched to their show automatically and get posters,
+  descriptions and per-episode "on disk" badges
+- Continue Watching with resume positions saved by `mpv`
+- Nyaa search tab and a Downloads tab with pause and resume
 
 ## Dependencies
 
-- C compiler
-- `make`
-- `pkg-config`
-- SDL2
-- SDL2_ttf
-- `mpv` for playback and resume support
-- `ffmpeg` for thumbnails
-
-If `mpv` is not installed, `cwatch` tries other players in this order:
-`vlc`, `celluloid`, `parole`, then `xdg-open`.
+- C and C++ compilers, `make`, `pkg-config`
+- SDL2, SDL2_ttf, SDL2_image
+- libcurl, json-c
+- libtorrent-rasterbar 2.x (for `cwatch-stream`)
+- `mpv` for playback, streaming and resume support
+- `ffmpeg` / `ffprobe` for thumbnails and progress bars
+- Noto Sans fonts recommended (Noto Sans CJK for Japanese and Chinese titles)
 
 Examples:
 
-- Arch Linux / Artix Linux: `sudo pacman -S --needed git base-devel pkgconf sdl2 sdl2_ttf mpv ffmpeg`
-- Debian / Ubuntu: `sudo apt install git build-essential pkg-config libsdl2-dev libsdl2-ttf-dev mpv ffmpeg`
-- Fedora: `sudo dnf install git gcc make pkgconf-pkg-config SDL2-devel SDL2_ttf-devel mpv ffmpeg`
-- openSUSE: `sudo zypper install git gcc make pkg-config libSDL2-devel SDL2_ttf-devel mpv ffmpeg`
-- Gentoo: `sudo emerge --ask dev-vcs/git sys-devel/gcc sys-devel/make virtual/pkgconfig media-libs/libsdl2 media-libs/sdl2-ttf media-video/mpv media-video/ffmpeg`
-- Alpine: `sudo apk add git build-base pkgconf sdl2-dev sdl2_ttf-dev mpv ffmpeg`
+- Arch Linux / Artix Linux: `sudo pacman -S --needed git base-devel pkgconf sdl2 sdl2_ttf sdl2_image curl json-c libtorrent-rasterbar mpv ffmpeg noto-fonts noto-fonts-cjk`
+- Debian / Ubuntu: `sudo apt install git build-essential pkg-config libsdl2-dev libsdl2-ttf-dev libsdl2-image-dev libcurl4-openssl-dev libjson-c-dev libtorrent-rasterbar-dev mpv ffmpeg fonts-noto-core fonts-noto-cjk`
+- Fedora: `sudo dnf install git gcc gcc-c++ make pkgconf-pkg-config SDL2-devel SDL2_ttf-devel SDL2_image-devel libcurl-devel json-c-devel rb_libtorrent-devel mpv ffmpeg google-noto-sans-fonts google-noto-sans-cjk-fonts`
+- openSUSE: `sudo zypper install git gcc gcc-c++ make pkg-config libSDL2-devel SDL2_ttf-devel libSDL2_image-devel libcurl-devel libjson-c-devel libtorrent-rasterbar-devel mpv ffmpeg noto-sans-fonts noto-sans-cjk-fonts`
+- Gentoo: `sudo emerge --ask dev-vcs/git virtual/pkgconfig media-libs/libsdl2 media-libs/sdl2-ttf media-libs/sdl2-image net-misc/curl dev-libs/json-c net-libs/libtorrent-rasterbar media-video/mpv media-video/ffmpeg media-fonts/noto media-fonts/noto-cjk`
+- Alpine: `sudo apk add git build-base pkgconf sdl2-dev sdl2_ttf-dev sdl2_image-dev curl-dev json-c-dev libtorrent-rasterbar-dev mpv ffmpeg font-noto font-noto-cjk`
 
-## Full Install Example
-
-Minimal install:
+## Install
 
 ```sh
 git clone https://github.com/Vifuddyxg/cwatch
@@ -41,77 +43,66 @@ make
 sudo make install-desktop
 ```
 
-`install-desktop` installs:
+`make` builds two programs:
 
-- `cwatch` to `/usr/local/bin`
-- `cwatch.desktop` to `/usr/local/share/applications`
+- `cwatch`, the app
+- `cwatch-stream`, the torrent helper that streams to `mpv` over local HTTP
+  and runs downloads
 
-If you only want the binary and do not need an application launcher:
-
-```sh
-sudo make install
-```
-
-Run after installing:
+`install-desktop` installs both to `/usr/local/bin` and `cwatch.desktop` to
+`/usr/local/share/applications`. Use `sudo make install` without the desktop
+entry. `cwatch` looks for `cwatch-stream` next to its own binary first, then
+in `PATH`, so `./cwatch` also works without installing.
 
 ```sh
 cwatch
 cwatch /path/to/media
 ```
 
-Run without installing:
-
-```sh
-./cwatch
-./cwatch /path/to/media
-```
-
-If you installed the desktop entry, `cwatch` should appear in application
-launchers that support desktop files:
-
-```sh
-rofi -show drun
-wofi --show drun
-```
-
-## Features
-
-- Scans one or more local media folders
-- Groups nested videos by folder
-- Opens videos with `mpv`, `vlc`, `celluloid`, `parole`, or `xdg-open`
-- Saves resume positions when using `mpv`
-- Lets you pin folders and mark videos as watched
-- Generates thumbnails with `ffmpeg` when available
-
-Supported video extensions: `.mp4`, `.mkv`, `.webm`, `.avi`, `.mov`, `.m4v`,
-`.flv`, `.wmv`, and `.ogv`.
-
 ## Layout
 
 ```text
 ~/media/
-  Movies/
-    Some Movie.mkv
-  Series Name/
-    Season 1/
-      Episode 01.mp4
-      Episode 02.mp4
+  Attack on Titan/
+    Attack.on.Titan.S01E01.mkv
+    Attack.on.Titan.S01E02.mkv
+  Some Movie (2020).mkv
 ```
 
-Nested folders are supported. Videos are grouped by their directory path.
-Files directly in `~/media` appear in `Videos`.
+Each top-level folder is one show or movie. Loose files with the same name
+(for example `Show.S04E07.mkv` and `Show.S04E08.mkv`) are grouped together.
+Episode numbers come from `S01E02` or ` - 02` in the file name. Downloads go to
+`~/media/<title>/`.
+
+State is kept in `~/.local/state/cwatch` (resume positions, watched videos,
+matches, history, downloads) and cache in `~/.cache/cwatch`.
 
 ## Controls
 
-- Click, `Enter`, or `Space`: open selected video or folder
-- Right click: pin or unpin a folder
-- Arrow keys: move selection
-- Mouse wheel / PageUp / PageDown: scroll
+- Arrow keys: move; Up from the banner reaches the top menu
+- `Enter` / click: open, play, or switch tab
+- `Esc` / `Backspace` / right click: back
 - `/`: search
-- `d`: add another folder path to the current library
-- `i`: pin/unpin selected folder
-- `m`: mark/unmark selected video as watched
-- `p`: switch player
-- `r`: rescan library
-- `Backspace`: go back from folder view
-- `Esc`: close search, go back, or quit
+- `p`: switch player for local files
+- `r`: rescan the library
+- `d` on Home or My Library: add another media folder
+
+Detail page:
+
+- `Enter`: play the episode (local file if it is on disk, otherwise pick a source)
+- `d`: download the episode
+- `m`: mark a local episode as watched
+- Left / Right: change season
+
+Sources window:
+
+- `Enter`: play, `d`: download
+- `Tab`: switch between Torrentio and Nyaa
+- `/`: edit the Nyaa search
+
+Batch file list: `Enter` play, `d` download file, `a` download all.
+
+Downloads tab: `Space` pause or resume, `Delete` remove from the list.
+
+Streams stop when `cwatch` closes. Unfinished downloads pause and continue the
+next time it starts.

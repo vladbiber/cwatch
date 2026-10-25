@@ -3,3 +3,4 @@ cwatch
 .cache/
 *.o
 *.bmp
+cwatch-stream
