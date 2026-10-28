@@ -142,6 +142,8 @@ int nav_hit(App *a, int x, int y);
 void set_tab(App *a, int tab);
 void open_meta(App *a, const Meta *m);
 void play_meta(App *a, const Meta *m);
+void play_local(App *a, int item, const char *show);
+void binge_tick(App *a);
 
 void detail_open_meta(App *a, const Meta *m);
 void detail_close(App *a);

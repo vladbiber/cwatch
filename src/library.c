@@ -13,7 +13,11 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#define MAX_WATCHED_EPS 4096
+
 static Library *active_lib;
+static char watched_eps[MAX_WATCHED_EPS][96];
+static int watched_ep_count;
 static unsigned scan_gen;
 static bool dirty;
 
@@ -204,17 +208,36 @@ static void load_progress(Library *lib)
     }
     closedir(dir);
 
-    char wpath[PATH_MAX];
-    state_file(wpath, sizeof(wpath), "watched.txt");
-    FILE *fp = fopen(wpath, "r");
-    if (!fp) return;
-    char line[PATH_MAX + 16];
-    while (fgets(line, sizeof(line), fp)) {
-        trim_line(line);
-        for (int i = 0; i < lib->item_count; i++)
-            if (strcmp(lib->items[i].path, line) == 0) lib->items[i].watched = true;
+    for (int i = 0; i < lib->item_count; i++) lib->items[i].watched = false;
+    watched_ep_count = 0;
+    const char *files[] = {"watched.txt", "watched_auto.txt"};
+    for (int f = 0; f < 2; f++) {
+        char wpath[PATH_MAX];
+        state_file(wpath, sizeof(wpath), files[f]);
+        FILE *fp = fopen(wpath, "r");
+        if (!fp) continue;
+        char line[PATH_MAX + 16];
+        while (fgets(line, sizeof(line), fp)) {
+            trim_line(line);
+            if (!line[0]) continue;
+            if (line[0] != '/') {
+                if (watched_ep_count < MAX_WATCHED_EPS && !library_ep_watched(line))
+                    copy_text(watched_eps[watched_ep_count++], sizeof(watched_eps[0]), line);
+                continue;
+            }
+            for (int i = 0; i < lib->item_count; i++)
+                if (strcmp(lib->items[i].path, line) == 0) lib->items[i].watched = true;
+        }
+        fclose(fp);
     }
-    fclose(fp);
+}
+
+bool library_ep_watched(const char *ep_id)
+{
+    if (!ep_id || !ep_id[0]) return false;
+    for (int i = 0; i < watched_ep_count; i++)
+        if (strcmp(watched_eps[i], ep_id) == 0) return true;
+    return false;
 }
 
 static void load_matches(Library *lib)
@@ -319,17 +342,45 @@ void library_reload_progress(Library *lib)
     load_progress(lib);
 }
 
+static void rewrite_without(const char *name, const char *drop)
+{
+    char path[PATH_MAX], tmp[PATH_MAX + 8];
+    state_file(path, sizeof(path), name);
+    snprintf(tmp, sizeof(tmp), "%s.tmp", path);
+    FILE *in = fopen(path, "r");
+    if (!in) return;
+    FILE *out = fopen(tmp, "w");
+    if (!out) {
+        fclose(in);
+        return;
+    }
+    char line[PATH_MAX + 16];
+    while (fgets(line, sizeof(line), in)) {
+        trim_line(line);
+        if (line[0] && strcmp(line, drop) != 0) fprintf(out, "%s\n", line);
+    }
+    fclose(in);
+    fclose(out);
+    rename(tmp, path);
+}
+
 void library_toggle_watched(Library *lib, int item)
 {
     if (item < 0 || item >= lib->item_count) return;
-    lib->items[item].watched = !lib->items[item].watched;
-    char path[PATH_MAX];
-    state_file(path, sizeof(path), "watched.txt");
-    FILE *fp = fopen(path, "w");
-    if (!fp) return;
-    for (int i = 0; i < lib->item_count; i++)
-        if (lib->items[i].watched) fprintf(fp, "%s\n", lib->items[i].path);
-    fclose(fp);
+    LocalItem *it = &lib->items[item];
+    it->watched = !it->watched;
+    if (it->watched) {
+        char path[PATH_MAX];
+        state_file(path, sizeof(path), "watched.txt");
+        FILE *fp = fopen(path, "a");
+        if (fp) {
+            fprintf(fp, "%s\n", it->path);
+            fclose(fp);
+        }
+    } else {
+        rewrite_without("watched.txt", it->path);
+        rewrite_without("watched_auto.txt", it->path);
+    }
 }
 
 void library_set_match(Library *lib, int col, const Meta *m)
@@ -434,8 +485,10 @@ int library_next_item(const Library *lib, int col)
     }
     if (best >= 0) {
         const LocalItem *it = &lib->items[c->items[best]];
-        if (it->duration > 0 && it->progress_sec > it->duration * 0.9 && best + 1 < c->count)
-            return c->items[best + 1];
+        bool done = it->watched || (it->duration > 0 && it->progress_sec > it->duration * 0.9);
+        if (!done) return c->items[best];
+        for (int j = best + 1; j < c->count; j++)
+            if (!lib->items[c->items[j]].watched) return c->items[j];
         return c->items[best];
     }
     for (int j = 0; j < c->count; j++)

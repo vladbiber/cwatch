@@ -416,6 +416,7 @@ int main(int argc, char **argv)
         net_poll();
         playback_poll();
         browse_tick(a);
+        binge_tick(a);
         int state = stream_status()->state;
         if (state != last_state) {
             if (state == ST_IDLE) {

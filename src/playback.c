@@ -1,5 +1,7 @@
 #include "playback.h"
+#include "mpvscript.h"
 
+#include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <json-c/json.h>
@@ -26,6 +28,8 @@ typedef struct {
     bool retried;
     HistoryEntry hist;
     bool has_hist;
+    char next_label[TITLE_LEN];
+    bool want_next;
 } Session;
 
 static StreamStatus status;
@@ -36,6 +40,7 @@ static bool dl_changed;
 static HistoryEntry history[MAX_HISTORY];
 static int history_n;
 static pid_t reap[MAX_REAP];
+static unsigned serial;
 
 static void reap_later(pid_t pid)
 {
@@ -189,24 +194,66 @@ int discover_players(Player *players)
     return count;
 }
 
-static pid_t launch_mpv(const char *target, const char *title)
+typedef struct {
+    const char *mode;
+    const char *next;
+    const char *track_key;
+    const char *ep_key;
+} MpvCtx;
+
+static char script_path[PATH_MAX];
+
+static void write_script(void)
 {
-    char wl[PATH_MAX], wl_arg[PATH_MAX + 40], title_arg[TITLE_LEN + 32];
+    state_file(script_path, sizeof(script_path), "cwatch.lua");
+    FILE *fp = fopen(script_path, "w");
+    if (!fp) {
+        script_path[0] = '\0';
+        return;
+    }
+    fputs(MPV_SCRIPT, fp);
+    fclose(fp);
+}
+
+void track_key_for(const char *show, char *out, size_t len)
+{
+    char lower[TITLE_LEN];
+    size_t i = 0;
+    for (; show && show[i] && i + 1 < sizeof(lower); i++) lower[i] = (char)tolower((unsigned char)show[i]);
+    lower[i] = '\0';
+    snprintf(out, len, "%016lx", hash_string(lower));
+}
+
+static pid_t launch_mpv(const char *target, const char *title, const MpvCtx *ctx, bool stream)
+{
+    char wl[PATH_MAX], wl_arg[PATH_MAX + 40], title_arg[TITLE_LEN + 32], script_arg[PATH_MAX + 16], state[PATH_MAX];
     watch_later_dir(wl, sizeof(wl));
+    state_dir(state, sizeof(state));
     snprintf(wl_arg, sizeof(wl_arg), "--watch-later-directory=%s", wl);
     snprintf(title_arg, sizeof(title_arg), "--force-media-title=%s", title ? title : "");
+    if (!title) copy_text(title_arg, sizeof(title_arg), "--title=${media-title}");
+    snprintf(script_arg, sizeof(script_arg), "--script=%s", script_path);
+    if (!script_path[0]) copy_text(script_arg, sizeof(script_arg), "--idle=no");
     bool dry = getenv("CWATCH_DRYRUN") != NULL;
     pid_t pid = fork();
     if (pid == 0) {
         setsid();
+        setenv("CWATCH_STATE", dry ? "" : state, 1);
+        setenv("CWATCH_MODE", ctx && ctx->mode ? ctx->mode : "local", 1);
+        setenv("CWATCH_NEXT", ctx && ctx->next ? ctx->next : "", 1);
+        setenv("CWATCH_TRACKKEY", ctx && ctx->track_key ? ctx->track_key : "", 1);
+        setenv("CWATCH_EPKEY", ctx && ctx->ep_key ? ctx->ep_key : "", 1);
+        const char *keep = stream ? "--keep-open=yes" : "--keep-open=no";
         if (dry)
-            execlp("mpv", "mpv", "--vo=null", "--ao=null", "--frames=120", "--really-quiet",
-                   "--network-timeout=300", title_arg, target, (char *)NULL);
+            execlp("mpv", "mpv", "--vo=null", "--ao=null", "--really-quiet", "--network-timeout=300",
+                   getenv("CWATCH_DRYRUN_FULL") ? "--speed=100" : "--frames=120", "--playlist-start=0",
+                   "--loop-playlist=no", "--reset-on-next-file=all", "--prefetch-playlist=no",
+                   keep, script_arg, title_arg, target, (char *)NULL);
         else
             execlp("mpv", "mpv", "--save-position-on-quit=yes", "--resume-playback=yes",
                    "--write-filename-in-watch-later-config=yes", "--watch-later-options=start",
-                   "--network-timeout=300", "--force-window=immediate", "--keep-open=no",
-                   wl_arg, title_arg, target, (char *)NULL);
+                   "--network-timeout=300", "--force-window=immediate", "--slang=eng,en", keep,
+                   wl_arg, script_arg, title_arg, target, (char *)NULL);
         _exit(127);
     }
     return pid;
@@ -215,7 +262,7 @@ static pid_t launch_mpv(const char *target, const char *title)
 void play_file(const char *path, const Player *player, const char *title)
 {
     if (strcmp(player->exec, "mpv") == 0 || getenv("CWATCH_DRYRUN")) {
-        reap_later(launch_mpv(path, title));
+        reap_later(launch_mpv(path, title, NULL, false));
         return;
     }
     pid_t pid = fork();
@@ -225,6 +272,31 @@ void play_file(const char *path, const Player *player, const char *title)
         _exit(127);
     }
     reap_later(pid);
+}
+
+void play_playlist(char paths[][PATH_MAX], char titles[][TITLE_LEN], int n, const Player *player, const char *show)
+{
+    if (n <= 0) return;
+    if (n == 1 || (strcmp(player->exec, "mpv") != 0 && !getenv("CWATCH_DRYRUN"))) {
+        if (strcmp(player->exec, "mpv") != 0) {
+            play_file(paths[0], player, titles[0]);
+            return;
+        }
+    }
+    char m3u[PATH_MAX];
+    state_file(m3u, sizeof(m3u), "playlist.m3u");
+    FILE *fp = fopen(m3u, "w");
+    if (!fp) {
+        play_file(paths[0], player, titles[0]);
+        return;
+    }
+    fprintf(fp, "#EXTM3U\n");
+    for (int i = 0; i < n; i++) fprintf(fp, "#EXTINF:-1,%s\n%s\n", titles[i], paths[i]);
+    fclose(fp);
+    char key[32];
+    track_key_for(show, key, sizeof(key));
+    MpvCtx ctx = {"local", "", key, ""};
+    reap_later(launch_mpv(m3u, NULL, &ctx, false));
 }
 
 static void history_save(void)
@@ -347,6 +419,8 @@ bool play_torrent(const char *magnet, int file_idx, const char *title, const His
     sess.retried = false;
     sess.has_hist = hist != NULL;
     if (hist) sess.hist = *hist;
+    sess.next_label[0] = '\0';
+    serial++;
     copy_text(status.title, sizeof(status.title), title);
     status.started = SDL_GetTicks();
     char key[URL_LEN * 2 + 16];
@@ -376,12 +450,43 @@ const StreamStatus *stream_status(void)
     return &status;
 }
 
+unsigned stream_serial(void)
+{
+    return serial;
+}
+
+const HistoryEntry *stream_hist(void)
+{
+    return sess.has_hist ? &sess.hist : NULL;
+}
+
+void stream_set_next(const char *label)
+{
+    copy_text(sess.next_label, sizeof(sess.next_label), label);
+}
+
+bool stream_take_next(HistoryEntry *out, char *hash, size_t hash_len)
+{
+    if (!sess.want_next) return false;
+    sess.want_next = false;
+    if (!sess.has_hist) return false;
+    *out = sess.hist;
+    const char *b = strstr(sess.magnet, "btih:");
+    copy_text(hash, hash_len, b ? b + 5 : "");
+    char *amp = strchr(hash, '&');
+    if (amp) *amp = '\0';
+    return true;
+}
+
 static void handle_stream_line(const char *line)
 {
     if (getenv("CWATCH_DEBUG")) fprintf(stderr, "stream: %s\n", line);
     if (strncmp(line, "URL ", 4) == 0 && sess.mpv <= 0) {
         copy_text(status.url, sizeof(status.url), line + 4);
-        sess.mpv = launch_mpv(status.url, status.title);
+        char key[32];
+        track_key_for(sess.has_hist ? sess.hist.name : status.title, key, sizeof(key));
+        MpvCtx ctx = {"stream", sess.next_label, key, sess.has_hist ? (sess.hist.ep_id[0] ? sess.hist.ep_id : sess.hist.meta_id) : ""};
+        sess.mpv = launch_mpv(status.url, status.title, &ctx, true);
         status.state = ST_PLAYING;
         if (sess.has_hist) {
             copy_text(sess.hist.url, sizeof(sess.hist.url), status.url);
@@ -423,6 +528,7 @@ static void poll_stream(void)
         pid_t r = waitpid(sess.mpv, &st, WNOHANG);
         if (r == sess.mpv || (r < 0 && errno == ECHILD)) {
             if (getenv("CWATCH_DEBUG")) fprintf(stderr, "mpv exited status=%d\n", r == sess.mpv ? st : -1);
+            if (r == sess.mpv && WIFEXITED(st) && WEXITSTATUS(st) == 42) sess.want_next = true;
             sess.mpv = 0;
             session_close_helper();
             status.state = ST_IDLE;
@@ -583,6 +689,7 @@ static void poll_downloads(void)
 void playback_init(void)
 {
     signal(SIGPIPE, SIG_IGN);
+    write_script();
     history_load();
     char path[PATH_MAX];
     state_file(path, sizeof(path), "downloads.json");

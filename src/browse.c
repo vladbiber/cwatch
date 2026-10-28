@@ -683,17 +683,40 @@ void set_tab(App *a, int tab)
     if (tab != TAB_NYAA && tab != TAB_DOWNLOADS) browse_build(a);
 }
 
+void play_local(App *a, int item, const char *show)
+{
+    if (item < 0 || item >= a->lib->item_count) return;
+    LocalItem *li = &a->lib->items[item];
+    Collection *c = &a->lib->cols[li->collection];
+    int start = 0;
+    for (int j = 0; j < c->count; j++)
+        if (c->items[j] == item) start = j;
+    int n = c->count - start;
+    if (n > 300) n = 300;
+    if (n <= 0) return;
+    char (*paths)[PATH_MAX] = calloc((size_t)n, PATH_MAX);
+    char (*titles)[TITLE_LEN] = calloc((size_t)n, TITLE_LEN);
+    if (!paths || !titles) {
+        free(paths);
+        free(titles);
+        return;
+    }
+    for (int k = 0; k < n; k++) {
+        LocalItem *it = &a->lib->items[c->items[start + k]];
+        copy_text(paths[k], PATH_MAX, it->path);
+        if (c->count > 1) snprintf(titles[k], TITLE_LEN, "%s  S%d:E%d", show, it->season, it->episode);
+        else copy_text(titles[k], TITLE_LEN, show);
+    }
+    play_playlist(paths, titles, n, &a->players[a->player_idx], show);
+    app_toast(a, "Playing %s", titles[0]);
+    free(paths);
+    free(titles);
+}
+
 void play_meta(App *a, const Meta *m)
 {
     if (m->local_item >= 0 && m->local_item < a->lib->item_count) {
-        LocalItem *li = &a->lib->items[m->local_item];
-        char title[TITLE_LEN * 2];
-        if (a->lib->cols[li->collection].count > 1)
-            snprintf(title, sizeof(title), "%s  S%d:E%d", m->name, li->season, li->episode);
-        else
-            copy_text(title, sizeof(title), m->name);
-        play_file(li->path, &a->players[a->player_idx], title);
-        app_toast(a, "Playing %s", title);
+        play_local(a, m->local_item, m->name);
         return;
     }
     if (m->hist >= 0) {

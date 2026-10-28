@@ -59,6 +59,12 @@ int discover_players(Player *players);
 char *helper_capture(const char *mode, const char *source, int timeout_s);
 
 void play_file(const char *path, const Player *player, const char *title);
+void play_playlist(char paths[][PATH_MAX], char titles[][TITLE_LEN], int n, const Player *player, const char *show);
+void track_key_for(const char *show, char *out, size_t len);
+void stream_set_next(const char *label);
+unsigned stream_serial(void);
+const HistoryEntry *stream_hist(void);
+bool stream_take_next(HistoryEntry *out, char *hash, size_t hash_len);
 bool play_torrent(const char *magnet, int file_idx, const char *title, const HistoryEntry *hist);
 void stream_cancel(void);
 const StreamStatus *stream_status(void);

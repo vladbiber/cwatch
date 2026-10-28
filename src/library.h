@@ -52,6 +52,7 @@ int library_find_episode(const Library *lib, int col, int season, int episode);
 int library_find_by_name(const Library *lib, const char *name);
 double watch_later_progress(const char *target, long *mtime);
 bool library_take_dirty(void);
+bool library_ep_watched(const char *ep_id);
 void library_request_durations(Library *lib);
 
 #endif

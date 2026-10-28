@@ -100,6 +100,11 @@ Sources window:
 - `Tab`: switch between Torrentio and Nyaa
 - `/`: edit the Nyaa search
 
+While playing in `mpv`, a Next Episode button shows up near the end of an
+episode (click it or press `n`), and the next episode starts on its own when
+one ends, for files on disk and for streams. Audio and subtitle choices are
+remembered per show. Finished episodes are marked as watched.
+
 Batch file list: `Enter` play, `d` download file, `a` download all.
 
 Downloads tab: `Space` pause or resume, `Delete` remove from the list.

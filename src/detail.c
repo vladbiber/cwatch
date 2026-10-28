@@ -150,11 +150,7 @@ static void episode_heading(App *a, const Episode *e, char *heading, size_t hl, 
 static void open_episode(App *a, const Episode *e, bool download)
 {
     if (!download && e->local_item >= 0) {
-        LocalItem *li = &a->lib->items[e->local_item];
-        char heading[TITLE_LEN * 2], play[TITLE_LEN];
-        episode_heading(a, e, heading, sizeof(heading), play, sizeof(play));
-        play_file(li->path, &a->players[a->player_idx], play);
-        app_toast(a, "Playing %s", play);
+        play_local(a, e->local_item, a->det.mf->meta.name);
         return;
     }
     if (!e->id[0]) {
@@ -199,8 +195,7 @@ static void detail_play(App *a, bool download)
     if (!download && d->col >= 0) {
         int it = library_next_item(a->lib, d->col);
         if (it >= 0) {
-            play_file(a->lib->items[it].path, &a->players[a->player_idx], m->name);
-            app_toast(a, "Playing %s", m->name);
+            play_local(a, it, m->name);
             return;
         }
     }
@@ -353,17 +348,37 @@ void detail_render(App *a)
         if (t) draw_cover(a->r, t, tx, ey, tw, thh, 255);
         else draw_placeholder(a->r, e->title, tx, ey, tw, thh);
         LocalItem *li = e->local_item >= 0 ? &a->lib->items[e->local_item] : NULL;
-        if (li && li->has_progress && li->duration > 0)
-            draw_progress(a->r, tx, ey + thh - 4, tw, 4, li->progress_sec / li->duration);
+        bool watched = (li && li->watched) || library_ep_watched(e->id);
+        if (watched) {
+            fill_rect(a->r, tx, ey, tw, thh, (Color){0, 0, 0, 120});
+            draw_progress(a->r, tx, ey + thh - 5, tw, 5, 1.0);
+        } else if (li && li->has_progress && li->duration > 0) {
+            draw_progress(a->r, tx, ey + thh - 5, tw, 5, li->progress_sec / li->duration);
+        }
         int txx = tx + tw + 22, tww = list_w - tw - 120;
-        draw_text_fit(a->r, a->ui.mdb, e->title[0] ? e->title : "Episode", txx, ey + 4, tww - 160, C_WHITE);
+        draw_text_fit(a->r, a->ui.mdb, e->title[0] ? e->title : "Episode", txx, ey + 4, tww - 160,
+                      watched ? C_DIM : C_WHITE);
+        int bx2 = 60 + list_w;
         if (li) {
-            const char *badge = li->watched ? "Watched" : li->has_progress ? "In progress" : "On disk";
-            Color bc = li->watched ? (Color){80, 80, 80, 255} : C_GREEN;
+            const char *badge = li->has_progress && !watched ? "In progress" : "On disk";
             int bw = text_width(a->ui.xs, badge) + 18;
-            fill_round(a->r, 60 + list_w - bw, ey + 6, bw, 22, 4, bc);
-            draw_text(a->r, a->ui.xs, badge, 60 + list_w - bw + 9, ey + 8, C_BLACK, ALIGN_LEFT);
-        } else if (e->released[0]) {
+            bx2 -= bw;
+            fill_round(a->r, bx2, ey + 6, bw, 22, 4, C_GREEN);
+            draw_text(a->r, a->ui.xs, badge, bx2 + 9, ey + 8, C_BLACK, ALIGN_LEFT);
+            bx2 -= 8;
+        }
+        if (watched) {
+            int bw = text_width(a->ui.xs, "Watched") + 36;
+            bx2 -= bw;
+            fill_round(a->r, bx2, ey + 6, bw, 22, 4, (Color){230, 230, 230, 255});
+            SDL_SetRenderDrawColor(a->r, 0, 0, 0, 255);
+            for (int t = 0; t < 2; t++) {
+                SDL_RenderDrawLine(a->r, bx2 + 8, ey + 16 + t, bx2 + 12, ey + 20 + t);
+                SDL_RenderDrawLine(a->r, bx2 + 12, ey + 20 + t, bx2 + 20, ey + 11 + t);
+            }
+            draw_text(a->r, a->ui.xs, "Watched", bx2 + 26, ey + 8, C_BLACK, ALIGN_LEFT);
+        }
+        if (!li && !watched && e->released[0]) {
             char date[16];
             copy_text(date, 11, e->released);
             draw_text(a->r, a->ui.xs, date, 60 + list_w, ey + 8, C_FAINT, ALIGN_RIGHT);
